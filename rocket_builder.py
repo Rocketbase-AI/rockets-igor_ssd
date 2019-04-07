@@ -78,7 +78,7 @@ def postprocess(self, detections: torch.Tensor, input_img: Image, visualize: boo
 
     for i in range(detections.size(1)):
         j = 0
-        while detections[0,i,j,0] >= 0.6:
+        while detections[0,i,j,0] >= 0.3:
             score = detections[0,i,j,0]
             label_name = labels[i-1]
             pt = (detections[0,i,j,1:]*scale).cpu().numpy()
@@ -90,7 +90,7 @@ def postprocess(self, detections: torch.Tensor, input_img: Image, visualize: boo
         img_out = input_img
         ctx = ImageDraw.Draw(img_out, 'RGBA')
         for bbox in list_detections:
-            x1, y1, w, h, label, score = bbox
+            x1, y1, w, h, label_name, score = bbox
             ctx.rectangle([(x1, y1), (x1 + w, y1 + h)], outline=(255, 0, 0, 255), width=2)
             ctx.text((x1+5, y1+10), text="{}, {:.2f}".format(label_name, score))
         del ctx
