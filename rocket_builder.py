@@ -119,18 +119,19 @@ def postprocess(self, detections: torch.Tensor, input_img: Image, visualize: boo
             j+=1
 
     if visualize:
+        line_width = 2
         img_out = input_img
         ctx = ImageDraw.Draw(img_out, 'RGBA')
         for detection in list_detections:
             # Extract information from the detection
             topLeft = (detection['topLeft_x'], detection['topLeft_y'])
-            bottomRight = (detection['topLeft_x'] + detection['width'], detection['topLeft_y'] + detection['height'])
+            bottomRight = (detection['topLeft_x'] + detection['width'] - line_width, detection['topLeft_y'] + detection['height']- line_width)
             class_name = detection['class_name']
             bbox_confidence = detection['bbox_confidence']
             class_confidence = detection['class_confidence']
 
             # Draw the bounding boxes and the information related to it
-            ctx.rectangle([topLeft, bottomRight], outline=(255, 0, 0, 255), width=2)
+            ctx.rectangle([topLeft, bottomRight], outline=(255, 0, 0, 255), width=line_width)
             ctx.text((topLeft[0] + 5, topLeft[1] + 10), text="{}, {:.2f}, {:.2f}".format(class_name, bbox_confidence, class_confidence))
 
         del ctx
