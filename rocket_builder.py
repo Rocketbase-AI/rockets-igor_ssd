@@ -55,6 +55,16 @@ def preprocess(self, img: Image) -> torch.Tensor:
 
     return input_img.unsqueeze(0)
 
+def clamp(n, minn, maxn):
+    """Make sure n is between minn and maxn
+
+    Args:
+        n (number): Number to clamp
+        minn (number): minimum number allowed
+        maxn (number): maximum number allowed
+    """
+    return max(min(maxn, n), minn)
+
 def postprocess(self, detections: torch.Tensor, input_img: Image, visualize: bool=False):
     """Converts pytorch tensor into interpretable format
 
@@ -70,33 +80,60 @@ def postprocess(self, detections: torch.Tensor, input_img: Image, visualize: boo
         visualize (bool): If True outputs image with annotations else a list of bounding boxes
     """
     img = np.array(input_img)
+    img_height, img_width, _ =  img.shape
     detections = detections.data
+    score_threshold = 0.3
 
     list_detections = []
     # scale each detection back up to the image
     scale = torch.Tensor(img.shape[1::-1]).repeat(2)
 
+    # Go throught each class
     for i in range(detections.size(1)):
         j = 0
-        while detections[0,i,j,0] >= 0.3:
-            score = detections[0,i,j,0]
-            label_name = labels[i-1]
+        while detections[0,i,j,0] >= score_threshold:
+            # detections = [image_id, class_id, anchor, [score, anchor_x0, anchor_y0, anchor_x1, anchor_y1]]
+            score = clamp(detections[0,i,j,0], 0, 1).cpu().item()
+            label_name = str(labels[i-1])
+
             pt = (detections[0,i,j,1:]*scale).cpu().numpy()
-            coords = (pt[0], pt[1]), pt[2]-pt[0]+1, pt[3]-pt[1]+1
-            list_detections.append([pt[0], pt[1], pt[2]-pt[0]+1, pt[3]-pt[1]+1, label_name, score])
+
+            topLeft_x = int(clamp(round(pt[0]), 0, img_width))
+            topLeft_y = int(clamp(round(pt[1]), 0, img_height))
+
+            bottomRight_x = int(clamp(round(pt[2]), 0, img_width))
+            bottomRight_y = int(clamp(round(pt[3]), 0, img_width))
+            
+            width = abs(bottomRight_x - topLeft_x) + 1
+            height = abs(bottomRight_y - topLeft_y) + 1
+            
+            list_detections.append({
+                'topLeft_x': topLeft_x,
+                'topLeft_y': topLeft_y,
+                'width': width,
+                'height': height,
+                'bbox_confidence': score, # No bbox_confidence then it is equal to class_confidence
+                'class_name': label_name,
+                'class_confidence': score})
+            
             j+=1
 
     if visualize:
         img_out = input_img
         ctx = ImageDraw.Draw(img_out, 'RGBA')
-        for bbox in list_detections:
-            x1, y1, w, h, label_name, score = bbox
-            ctx.rectangle([(x1, y1), (x1 + w, y1 + h)], outline=(255, 0, 0, 255), width=2)
-            ctx.text((x1+5, y1+10), text="{}, {:.2f}".format(label_name, score))
+        for detection in list_detections:
+            # Extract information from the detection
+            topLeft = (detection['topLeft_x'], detection['topLeft_y'])
+            bottomRight = (detection['topLeft_x'] + detection['width'], detection['topLeft_y'] + detection['height'])
+            class_name = detection['class_name']
+            bbox_confidence = detection['bbox_confidence']
+            class_confidence = detection['class_confidence']
+
+            # Draw the bounding boxes and the information related to it
+            ctx.rectangle([topLeft, bottomRight], outline=(255, 0, 0, 255), width=2)
+            ctx.text((topLeft[0] + 5, topLeft[1] + 10), text="{}, {:.2f}, {:.2f}".format(class_name, bbox_confidence, class_confidence))
+
         del ctx
         return img_out
 
     return list_detections
-
-
-
