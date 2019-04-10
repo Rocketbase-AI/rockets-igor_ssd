@@ -4,7 +4,7 @@ from itertools import product as product
 import torch
 
 
-class PriorBox(object):
+class PriorBox(torch.nn.Module):
     """Compute priorbox coordinates in center-offset form for each source
     feature map.
     """

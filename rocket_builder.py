@@ -4,6 +4,7 @@ from PIL import Image
 import types
 import numpy as np
 from PIL import ImageDraw
+from torchvision import transforms
 
 from .data import VOC_CLASSES as labels
 
@@ -17,29 +18,52 @@ def build() -> nn.Module:
     and simplify interchangeability of different models.
     """
     # Build SSD3000
-    model = build_ssd('test', 300, 21)    # initialize SSD
+    model = build_ssd(size=300, num_classes=21)    # initialize SSD
     model.load_weights('./rockets/SSD/ssd300_mAP_77.43_v2.pth')
    
     # classes = load_classes(os.path.join(os.path.realpath(os.path.dirname(__file__)), "coco.data"))
 
     model.postprocess = types.MethodType(postprocess, model)
     model.preprocess = types.MethodType(preprocess, model)
+    model.train_forward = types.MethodType(train_forward, model)
+
     # model.label_to_class = types.MethodType(label_to_class, model)
     # model.get_loss = types.MethodType(get_loss, model)
     # setattr(model, 'classes', classes)
 
     return model
 
-def preprocess(self, img: Image) -> torch.Tensor:
+
+def preprocess(self, img: Image, labels: list = None) -> torch.Tensor:
     """Converts PIL Image or Array into pytorch tensor specific to this model
 
     Handles all the necessary steps for preprocessing such as resizing, normalization.
     Works with both single images and list/batch of images. Input image file is expected
     to be a `PIL.Image` object with 3 color channels.
+    Labels must have the following format: `x1, y1, x2, y2, category_id`
 
     Args:
-        x (list or PIL.Image): input image or list of images.
+        img (PIL.Image): input image
+        labels (list): list of bounding boxes and class labels
     """
+
+    # todo: support batch size bigger than 1 for training and inference
+    # todo: replace this hacky solution and work directly with tensors
+    if type(img) == Image.Image:
+        # PIL.Image
+        pass
+    elif type(img) == torch.Tensor:
+        # list of tensors
+        img = img[0].cpu()
+        img = transforms.ToPILImage()(img)
+    elif "PIL" in str(type(img)):  # type if file just has been opened
+        img = img.convert("RGB")
+    else:
+        raise TypeError("wrong input type: got {} but expected list of PIL.Image, "
+                        "single PIL.Image or torch.Tensor".format(type(img)))
+
+    in_width, in_height = img.size
+
     # Resize the image
     img = img.resize((300, 300), Image.ANTIALIAS)
     # Convert it to numpy array
@@ -52,8 +76,53 @@ def preprocess(self, img: Image) -> torch.Tensor:
     input_img = input_img[:, :, ::-1].copy()
     # Convert it to a tensor and permute the channels
     input_img = torch.from_numpy(input_img).permute(2, 0, 1)
+    out_tensor = input_img.unsqueeze(0)
 
-    return input_img.unsqueeze(0)
+    if labels is None:
+        return out_tensor
+
+    max_objects = 50
+    filled_labels = np.zeros((max_objects, 5))  # max objects in an image for training=50, 5=(x1,y1,x2,y2,category_id)
+    if labels is not None:
+        for idx, label in enumerate(labels):
+
+            padded_w = in_width
+            padded_h = in_height
+
+            # resize coordinates to match Yolov3 input size
+            scale_x = 300.0 / padded_w
+            scale_y = 300.0 / padded_h
+
+            label[0] *= scale_x
+            label[1] *= scale_y
+            label[2] *= scale_x
+            label[3] *= scale_y
+
+            x1 = label[0] / 300.0
+            y1 = label[1] / 300.0
+            x2 = label[2] / 300.0
+            y2 = label[3] / 300.0
+
+            filled_labels[idx] = np.asarray([x1, y1, x2, y2, label[4]])
+            if idx >= max_objects - 1:
+                break
+
+    # remove zero rows
+    # filled_labels = filled_labels[~np.all(filled_labels == 0, axis=1)]
+    filled_labels = torch.from_numpy(filled_labels)
+
+
+    return out_tensor, filled_labels.unsqueeze(0)
+
+
+def train_forward(self, x: torch.Tensor, targets: torch.Tensor):
+    """Performs forward pass and returns loss of the model
+
+    The loss can be directly fed into an optimizer.
+    """
+    loss = self.forward(x, targets.float())
+    return loss
+
 
 def clamp(n, minn, maxn):
     """Make sure n is between minn and maxn
